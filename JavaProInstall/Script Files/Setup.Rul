@@ -1,0 +1,385 @@
+//===========================================================================
+//
+//  File Name:    Setup.rul
+//
+//  Description:  Blank setup main script file
+//
+//  Comments:     Blank setup is an empty setup project. If you want to
+//				  create a new project via. step-by step instructions use the
+//				  Project Assistant.
+//
+//===========================================================================
+
+// Included header files ----------------------------------------------------
+#include "ifx.h"
+#include "mydlg.rul"
+string svUser,svPwd,svServer,svIP;
+
+//---------------------------------------------------------------------------                                                                        
+// OnFirstUIBefore
+//
+// First Install UI Sequence - Before Move Data
+//
+// The OnFirstUIBefore event is called by OnShowUI when the setup is
+// running in first install mode. By default this event displays UI allowing
+// the end user to specify installation parameters.
+//
+// Note: This event will not be called automatically in a
+// program...endprogram style sietup.
+//---------------------------------------------------------------------------
+function OnFirstUIBefore()
+    number  nResult, nLevel, nSize, nSetupType;
+    string  szTitle, szMsg, szOpt1, szOpt2, szLicenseFile;
+    string  szName, szCompany, szTargetPath, szDir, szFeatures;
+    BOOL    bLicenseAccepted;
+begin	
+
+    // Added in InstallShield 15 - Show an appropriate error message if
+    // -removeonly is specified and the product is not installed.
+    if( REMOVEONLY ) then
+        Disable( DIALOGCACHE );
+		szMsg = SdLoadString( IDS_IFX_ERROR_PRODUCT_NOT_INSTALLED_UNINST );
+   		SdSubstituteProductInfo( szMsg );
+		MessageBox( szMsg, SEVERE );
+		abort;
+    endif;
+   
+    nSetupType = COMPLETE;	
+    szDir = TARGETDIR;
+    szName = "";
+    szCompany = "";
+    bLicenseAccepted = FALSE;
+
+// Beginning of UI Sequence
+Dlg_Start:
+    nResult = 0;
+
+Dlg_SdWelcome:
+    szTitle = "";
+    szMsg = "";
+    //{{IS_SCRIPT_TAG(Dlg_SdWelcome)
+    nResult = SdWelcome( szTitle, szMsg );
+    //}}IS_SCRIPT_TAG(Dlg_SdWelcome)
+    if (nResult = BACK) goto Dlg_Start;
+
+Dlg_SdLicense2:
+    szTitle = "";
+    szOpt1 = "";
+    szOpt2 = "";
+    //{{IS_SCRIPT_TAG(License_File_Path)
+    szLicenseFile = SUPPORTDIR ^ "License.txt";
+    //}}IS_SCRIPT_TAG(License_File_Path)
+    //{{IS_SCRIPT_TAG(Dlg_SdLicense2)
+    nResult = SdLicense2Ex( szTitle, szOpt1, szOpt2, szLicenseFile, bLicenseAccepted, TRUE);
+    //}}IS_SCRIPT_TAG(Dlg_SdLicense2)
+    if (nResult = BACK) then
+        goto Dlg_SdWelcome;
+    else
+        bLicenseAccepted = TRUE;
+    endif;
+    
+dlg_Mydlg:
+	szTitle="";
+	szMsg="";
+	nResult=mydlg(svServer,svIP,svUser,svPwd);
+	if(nResult=BACK) goto Dlg_SdLicense2;
+
+Dlg_SdAskDestPath2:
+   
+	szTitle = "";
+    szMsg = "";
+		nResult = SdAskDestPath2( szTitle, szMsg, szDir );
+                //}}IS_SCRIPT_TAG(Dlg_SdAskDestPath2)
+        TARGETDIR = szDir;
+    if (nResult = BACK) goto dlg_Mydlg;
+   
+
+Dlg_SdFeatureTree: 
+    if ((nResult = BACK) && (nSetupType != CUSTOM)) goto Dlg_SdAskDestPath2;
+    szTitle = "";
+    szMsg = "";    szFeatures = "";
+    nLevel = 2;
+    if (nSetupType = CUSTOM) then
+        //{{IS_SCRIPT_TAG(Dlg_SdFeatureTree)	
+        nResult = SdFeatureTree( szTitle, szMsg, TARGETDIR, szFeatures, nLevel );
+        //}}IS_SCRIPT_TAG(Dlg_SdFeatureTree)
+        if (nResult = BACK) goto Dlg_SdAskDestPath2;  
+    endif;
+
+
+Dlg_ObjDialogs:
+    nResult = ShowObjWizardPages( nResult );
+    if (nResult = BACK) goto Dlg_SdFeatureTree;
+  
+Dlg_SdStartCopy2:
+    szTitle = "";    szMsg = "";
+    //{{IS_SCRIPT_TAG(Dlg_SdStartCopy2)	
+    nResult = SdStartCopy2( szTitle, szMsg);
+    //}}IS_SCRIPT_TAG(Dlg_SdStartCopy2)
+    if (nResult = BACK) goto Dlg_ObjDialogs;
+    // Added in 11.0 - Set appropriate StatusEx static text.
+    SetStatusExStaticText(SdLoadString( IDS_IFX_STATUSEX_STATICTEXT_FIRSTUI));
+ 
+    return 0;
+end;
+
+//---------------------------------------------------------------------------
+// OnEnd
+//
+// The OnEnd event is called at the end of the setup. This event is not
+// called if the setup is aborted.
+//---------------------------------------------------------------------------
+function OnEnd()
+begin
+ 
+end;
+
+//---------------------------------------------------------------------------
+// OnSQLServerInitialize
+//
+// The OnSQLServerInitialize event is called by OnFirstUIBefore to
+// establish any connections necessary for SQL Server support.
+//
+// This function will initialize the SQL Server runtime, and attempt to
+// make any necessary SQL Server connections, displaying a login dialog
+// for each one.
+//
+// Parameter nBtn indicates whether NEXT or BACK was the result of the 
+// previously displayed dialog.  It is for information purposes only.
+//
+// Note: This event will not be called automatically in a
+// program...endprogram style setup.
+//---------------------------------------------------------------------------
+function number OnSQLServerInitialize( nBtn )
+number nResult, nErrorCode, nErrorLine;
+number nCount;
+string szConnection;
+string szServer, szDB, szUser, szPassword;
+string szMessage;
+string szKey;
+LIST   listConnections;
+BOOL   bWinLogin;
+BOOL   bNext;
+begin
+
+    //First initialize SQL Server runtime
+    SQLRTInitialize2( );
+
+    //Get the names of all the necessary connections
+    listConnections = SQLRTGetConnections();
+    ListGetFirstString (listConnections, szConnection);
+
+    nCount = 0;
+
+    //determine if NEXT or BACK will be returned 
+    //if there are no connections to make
+    if( nBtn != BACK ) then
+        bNext = TRUE;
+    else
+        bNext = FALSE;
+		//start at end if going BACK
+		while (ISERR_SUCCESS = ListGetNextString( listConnections, szConnection ) );
+			nCount++;
+		endwhile;
+    endif;
+
+    // Login for each connection
+    while (nResult = ISERR_SUCCESS)
+
+        //Get Default values for connection
+        SQLRTGetConnectionInfo( szConnection, szServer, szDB, szUser, szPassword );
+
+        bWinLogin = SQLRTGetConnectionAuthentication( szConnection );
+
+        // Display login dialog (without connection name)
+        // COMMENT OUT TO SWAP DIALOGS
+        nResult = SQLServerSelectLogin2( szConnection, szServer, szUser, szPassword, bWinLogin, szDB, FALSE, TRUE );
+
+        // Display login dialog (with connection name)
+        // UNCOMMENT TO SWAP DIALOGS
+        // nResult = SQLServerSelectLogin2( szConnection, szServer, szUser, szPassword, bWinLogin, szDB, TRUE, TRUE );
+
+        if( nResult = NEXT ) then
+
+            //store data in case we need it again
+            SQLRTPutConnectionInfo2( szConnection, szServer, szDB, szUser, szPassword );
+
+	        SQLRTPutConnectionAuthentication( szConnection, bWinLogin );
+
+            //try connection
+            nResult = SQLRTConnect( szConnection, szServer, bWinLogin, szUser, szPassword );
+
+            if( nResult < ISERR_SUCCESS ) then
+
+                // Get error message
+				SQLRTGetErrorMessage( szMessage );
+
+				// Display error
+				MessageBox( szMessage, MB_OK );
+
+                //Show same login dialog again
+                nResult = ListCurrentString(listConnections, szConnection);
+
+            else
+
+                //SUCCESS
+
+                //Log connection info
+                Sprintf( szKey, SQL_FORMATSTRING_CONNECTION_SERVER, szConnection );
+                LogWriteCustomString( szKey, szServer );
+
+                Sprintf( szKey, SQL_FORMATSTRING_CONNECTION_USER, szConnection );
+                LogWriteCustomString( szKey, szUser );
+
+                Sprintf( szKey, SQL_FORMATSTRING_CONNECTION_AUTH, szConnection );
+                if( bWinLogin ) then
+                    LogWriteCustomNumber( szKey, SQL_AUTH_WINDOWS );
+                else
+                    LogWriteCustomNumber( szKey, SQL_AUTH_SQL );
+                endif;
+                
+                Sprintf( szKey, SQL_FORMATSTRING_CONNECTION_DB, szConnection );
+                LogWriteCustomString( szKey, szDB );
+
+                Sprintf( szKey, SQL_FORMATSTRING_CONNECTION_PWD, szConnection );
+                LogWriteCustomString( szKey, szPassword );
+
+                //Move on to next connection
+                nCount++;
+                bNext = TRUE;
+                nResult = ListGetNextString(listConnections, szConnection);
+
+            endif;
+
+        else
+
+            //BACK
+            nCount--;
+            bNext = FALSE;
+            nResult = ListSetIndex( listConnections, nCount );
+            ListCurrentString( listConnections, szConnection );
+
+        endif;
+
+    endwhile;
+
+    if( bNext ) then
+        return NEXT;
+    else
+        return BACK;
+    endif;
+
+end;
+
+//---------------------------------------------------------------------------
+// OnSQLServerInitializeMaint
+//
+// The OnSQLServerInitializeMaint event is called by OnMaintUIBefore to
+// establish any connections necessary for SQL Server support.
+//
+// This function will initialize the SQL Server runtime, and attempt to
+// make any necessary SQL Server connections, using login credentials
+// stored in the log file
+//
+// Note: This event will not be called automatically in a
+// program...endprogram style setup.
+//---------------------------------------------------------------------------
+function number OnSQLServerInitializeMaint()
+number nResult;
+number nCount;
+number nAuth;
+string szConnection;
+string szServer, szDB, szUser, szPassword;
+string szKey;
+LIST   listConnections;
+BOOL   bWinLogin;
+BOOL   bNext;
+begin
+
+    //First initialize SQL Server runtime
+    SQLRTInitialize2( );
+
+    //Get the names of all the necessary connections
+    listConnections = SQLRTGetConnections();
+    ListGetFirstString (listConnections, szConnection);
+
+    nCount = 0;
+
+    // Login for each connection
+    while (nResult = ISERR_SUCCESS)
+
+        //Get Default values for connection from INI
+        //(for use if log info is missing)
+        SQLRTGetConnectionInfo( szConnection, szServer, szDB, szUser, szPassword );
+
+        //Get Default values for connection from log
+        Sprintf( szKey, SQL_FORMATSTRING_CONNECTION_SERVER, szConnection );
+        LogReadCustomString( szKey, szServer );
+
+        Sprintf( szKey, SQL_FORMATSTRING_CONNECTION_USER, szConnection );
+        LogReadCustomString( szKey, szUser );
+
+        Sprintf( szKey, SQL_FORMATSTRING_CONNECTION_AUTH, szConnection );
+        LogReadCustomNumber( szKey, nAuth );
+        if( nAuth = SQL_AUTH_WINDOWS ) then
+            bWinLogin  = TRUE;
+        else
+            bWinLogin = FALSE;
+        endif;
+
+        Sprintf( szKey, SQL_FORMATSTRING_CONNECTION_DB, szConnection );
+        LogReadCustomString( szKey, szDB );
+
+        Sprintf( szKey, SQL_FORMATSTRING_CONNECTION_PWD, szConnection );
+        LogReadCustomString( szKey, szPassword );
+
+        //store data in case we need it again
+        SQLRTPutConnectionInfo2( szConnection, szServer, szDB, szUser, szPassword );
+        SQLRTPutConnectionAuthentication( szConnection, bWinLogin );
+
+        //Move on to next connection
+        nCount++;
+        bNext = TRUE;
+        nResult = ListGetNextString(listConnections, szConnection);
+
+    endwhile;
+
+end;
+
+//---------------------------------------------------------------------------
+// OnFirstUIAfter
+//
+// First Install UI Sequence - After Move Data
+//
+// The OnFirstUIAfter event called by OnShowUI after the file transfer
+// of the setup when the setup is running in first install mode. By default
+// this event displays UI that informs the end user that the setup has been
+// completed successfully.
+//
+// Note: This event will not be called automatically in a
+// program...endprogram style setup.
+//---------------------------------------------------------------------------
+function OnFirstUIAfter()
+    STRING szTitle, szMsg1, szMsg2, szOpt1, szOpt2;
+    NUMBER bvOpt1, bvOpt2;
+begin
+
+    ShowObjWizardPages(NEXT);
+    
+    szTitle = "";
+    szMsg1 = ""; 
+    szMsg2 = "";
+    szOpt1 = "";
+    szOpt2 = "";
+	bvOpt1   = FALSE;
+    bvOpt2   = FALSE;    
+    SavePropertyFile(svIP,svUser,svPwd);
+    //{{IS_SCRIPT_TAG(Dlg_SdDinishEx)	
+    if ( BATCH_INSTALL ) then
+    	SdFinishReboot ( szTitle , szMsg1 , SYS_BOOTMACHINE , szMsg2 , 0 );
+    else
+	    SdFinish ( szTitle , szMsg1 , szMsg2 , szOpt1 , szOpt2 , bvOpt1 , bvOpt2 );
+	endif;
+    //}}IS_SCRIPT_TAG(Dlg_SdDinishEx)	
+end;
+
